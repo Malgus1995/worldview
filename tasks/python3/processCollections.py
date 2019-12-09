@@ -17,7 +17,7 @@ input_dir = args[0]
 output_file = args[1]
 
 # Validate that the concept_id value is not a placeholder and handle multiple values
-def validate_add_concept_id(prod_id, concept_id):
+def validate_add_concept_id(wv_id, concept_id):
   if concept_id.startswith("TBD") or concept_id.startswith("N/A"):
     return
   if concept_id is not None:
@@ -25,16 +25,9 @@ def validate_add_concept_id(prod_id, concept_id):
     # Some values have spaces, sometimes spaces represent separate IDs
     # Here we are assuming if it starts with a C, each value is a separate ID
     if (len(split_ids) > 1) and all(c_id.startswith('C') for c_id in split_ids):
-      product_dict[prod_id].update({ 'concept-id': split_ids })
+      wv_product_dict[wv_id] = split_ids
     else:
-      product_dict[prod_id].update({ 'concept-id': concept_id })
-
-# Output dict should have WV product ID as keys, concept ids as values
-def format_output_dict():
-  for val in product_dict.values():
-    if val.get('concept-id'):
-      wv_id_val = val['wv-id']
-      wv_product_dict[wv_id_val] = val['concept-id']
+      wv_product_dict[wv_id] = concept_id
 
 # Get the product ids and concept ids from the respective sheets and add to product_dict
 def get_values_from_sheets(prod_id_sheet, prod_metadata_sheet):
@@ -44,13 +37,14 @@ def get_values_from_sheets(prod_id_sheet, prod_metadata_sheet):
     prod_id = row[0].value
     wv_id = row[2].value
     if prod_id is not None and wv_id is not None:
-      product_dict[prod_id] = { 'wv-id': wv_id }
+      product_dict[prod_id] =  wv_id
 
   for md_row in prod_metadata_sheet.iter_rows(min_row=3, max_col=2, max_row=200):
     prod_id = md_row[0].value
     concept_id = md_row[1].value
     if prod_id is not None and concept_id is not None:
-      validate_add_concept_id(prod_id, concept_id)
+      wv_id = product_dict[prod_id]
+      validate_add_concept_id(wv_id, concept_id)
 
 #MAIN
 for root, dirs, files in os.walk(input_dir):
@@ -66,7 +60,6 @@ for root, dirs, files in os.walk(input_dir):
       # sys.exit(1)
 
 with open(output_file, "w") as fp:
-  format_output_dict()
   json.dump(wv_product_dict, fp)
 
 print("%s: Mapped %s collections to products in %s" % (
