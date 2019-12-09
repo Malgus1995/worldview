@@ -104,6 +104,13 @@ if [ -e "$BUILD_DIR/vectordata" ] ; then
         "$BUILD_DIR/config/wv.json/vectordata"
 fi
 
+# Run processCollections.py if ICD appendices are present
+if [ -e "$BUILD_DIR/icdappendices" ] ; then
+    mkdir -p "$BUILD_DIR"/config/wv.json/collections
+    "$PYTHON_SCRIPTS_DIR/processCollections.py" "$BUILD_DIR/icdappendices" \
+        "$BUILD_DIR/config/wv.json/collections/collectionsMap.json"
+fi
+
 # Run processColormap.py and move colormaps where we want them
 if [ -e "$BUILD_DIR/colormaps" ] ; then
     mkdir -p "$BUILD_DIR"/config/palettes
