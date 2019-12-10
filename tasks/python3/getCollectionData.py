@@ -7,8 +7,8 @@ from pprint import pprint as pp
 import os
 import json
 import sys
-from datetime import datetime
-now = datetime.now()
+# from datetime import datetime
+# now = datetime.now()
 
 prog = os.path.basename(__file__)
 product_dict = {}
@@ -37,17 +37,15 @@ cmr_umm_keep_keys = [
     'Platforms',
     'DataCenters'
   ]
+bad_ids = {}
 
 parser = OptionParser(usage="Usage: %s <input_file> <output_file>" % prog)
 (options, args) = parser.parse_args()
 input_file = args[0]
 output_file = args[1]
 
-def process_entries(data, keep_keys):
+def process_entries(entries, keep_keys):
   new_entries = []
-  entries = data.get('feed', {}).get('entry')
-  if entries is None:
-    return []
   for entry in entries:
     new_entry = {}
     for key in keep_keys:
@@ -55,57 +53,56 @@ def process_entries(data, keep_keys):
     new_entries.append(new_entry)
   return new_entries
 
-def get_cmr_data(wv_id, concept_id):
+def clean_ids(item_tuple):
+  (wv_id, concept_id) = item_tuple
   # TODO
-  #   - need to handle multiple concept ids
-  #   - need to handle concept ids with spaces
-  if " " in concept_id or type(concept_id) is list:
-    return
+  #   - need to handle multiple concept ids (maybe not here)
+  if " " in concept_id or not concept_id.startswith("C") or type(concept_id) is list:
+    bad_ids[wv_id] = concept_id
+    return False
+  else:
+    return True
 
-  # with urlopen(cmr_collection_url + concept_id) as url:
-  #   data = json.loads(url.read().decode())
-  #   collection_data[wv_id] = { 'cmr': process_entries(data, cmr_keep_keys) }
-
-  # with urlopen(cmr_umm_collection_url + concept_id) as url:
-  #   collections = []
-  #   data = json.loads(url.read().decode())
-  #   items = data.get('items', [])
-  #   for item in items:
-  #     entries = [item.get('umm')]
-  #     collections.append(process_entries(entries, cmr_umm_keep_keys)[0])
-  #   collection_data[wv_id] = { 'umm': collections }
-
-def get_layers_products():
+def get_products_collections():
   total_items = len(wv_product_dict)
-  print('Fetching collection data for %s items...' % (total_items))
+  print('%s: Fetching collection data for %s items...' % (prog, total_items))
+  item_tuples = list(filter(clean_ids, wv_product_dict.items()))
 
   with FuturesSession(max_workers=100) as fs:
-    futures = {
-      fs.get(cmr_collection_url + c_id): wv_id for wv_id, c_id in wv_product_dict.items()
-    }
-    for future in as_completed(futures):
-      wv_id = futures[future]
+    cmr_futures = { fs.get(cmr_collection_url + c_id): wv_id for wv_id, c_id in item_tuples }
+    cmr_umm_futures = { fs.get(cmr_umm_collection_url + c_id): wv_id for wv_id, c_id in item_tuples }
+
+    for future in as_completed(cmr_futures):
+      wv_id = cmr_futures[future]
       data = future.result().json()
-      collection_data[wv_id] = { 'cmr': process_entries(data, cmr_keep_keys) }
-      print('Fetched data from: ', data.get('feed', {}).get('id'))
+      entries = data.get('feed', {}).get('entry')
+      collection_data[wv_id] = { 'cmr': process_entries(entries, cmr_keep_keys) }
+
+    for future in as_completed(cmr_umm_futures):
+      wv_id = cmr_umm_futures[future]
+      data = future.result().json()
+      for item in data.get('items', []):
+        entries = [item.get('umm')]
+        collection_data[wv_id].update({ 'umm': process_entries(entries, cmr_umm_keep_keys) })
 
   with open(output_file, "w") as fp:
     json.dump(collection_data, fp)
+    if len(bad_ids) > 0:
+      print("%s: WARNING: Could not get collection data for %s products:" % (prog, len(bad_ids)))
+      for wv_id, c_id in bad_ids.items():
+        print("%s: Product ID: %s, Concept ID: %s" % (prog, wv_id, c_id))
+    print("%s: Mapped %s collections to products in %s" % (
+      prog,
+      len(item_tuples),
+      os.path.basename(output_file)
+    ))
 
 #MAIN
-print('From: ', input_file)
-print('To: ', output_file)
-
 with open(input_file, 'rt') as concept_id_map:
   wv_product_dict = json.load(concept_id_map)
-  get_layers_products()
+  get_products_collections()
 with open(output_file, "w") as fp:
   json.dump(collection_data, fp)
-  print(datetime.now()-now)
+  # print(datetime.now()-now)
 
 
-print("%s: Mapped %s collections to products in %s" % (
-  prog,
-  len(wv_product_dict),
-  os.path.basename(output_file)
-))
