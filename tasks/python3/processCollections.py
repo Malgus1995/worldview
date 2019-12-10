@@ -1,4 +1,6 @@
 #!/usr/bin/env python
+
+from concurrent.futures import wait, ProcessPoolExecutor
 from optparse import OptionParser
 from openpyxl import load_workbook
 from pprint import pprint as pp
@@ -27,7 +29,7 @@ def validate_add_concept_id(wv_id, concept_id):
     if (len(split_ids) > 1) and all(c_id.startswith('C') for c_id in split_ids):
       # TODO re-enable or otherwise handle multiple concept ids
       # wv_product_dict[wv_id] = split_ids
-      print('multiple ids for ', wv_id)
+      print('%s WARNING: multiple ids for product %s' % (prog, wv_id))
     else:
       wv_product_dict[wv_id] = concept_id
 
@@ -49,23 +51,30 @@ def get_values_from_sheets(prod_id_sheet, prod_metadata_sheet):
       wv_id = product_dict[prod_id]
       validate_add_concept_id(wv_id, concept_id)
 
+def process_sheet(filePath):
+  filename = os.path.basename(filePath)
+  try:
+    print("%s: parsing: %s" % (prog, filename))
+    workbook = load_workbook(filePath)
+    prod_id_sheet = workbook['Product Identification']
+    prod_metadata_sheet = workbook['Product Metadata']
+    get_values_from_sheets(prod_id_sheet, prod_metadata_sheet)
+  except Exception as e:
+    sys.stderr.write("%s ERROR: [%s]: %s\n" % (prog, filename, str(e)))
+    # TODO should exit on error once these are fixed
+    # sys.exit(1)
 
 #MAIN
+futures = []
+executor = ProcessPoolExecutor()
+
 for root, dirs, files in os.walk(input_dir):
   for file in files:
     fp = os.path.join(input_dir, file)
-    try:
-      workbook = load_workbook(fp)
-      prod_id_sheet = workbook['Product Identification']
-      prod_metadata_sheet = workbook['Product Metadata']
-      get_values_from_sheets(prod_id_sheet, prod_metadata_sheet)
-    except Exception as e:
-      sys.stderr.write("%s ERROR: [%s]: %s\n" % (prog, file, str(e)))
-      # sys.exit(1)
-
-  with open(output_file, "w") as ofp:
-    json.dump(wv_product_dict, ofp)
-
+    futures.append(executor.submit(process_sheet, fp))
+wait(futures)
+with open(output_file, "w") as ofp:
+  json.dump(wv_product_dict, ofp)
 
 print("%s: Mapped %s collections to products in %s" % (
   prog,
