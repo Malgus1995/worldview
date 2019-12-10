@@ -60,6 +60,7 @@ mkdir -p "$DEST_DIR/config"
 mkdir -p "$BUILD_DIR/colormaps"
 mkdir -p "$BUILD_DIR/vectorstyles"
 mkdir -p "$BUILD_DIR/vectordata"
+mkdir -p "$BUILD_DIR/icdappendices"
 
 if [ -e "$BUILD_DIR/features.json" ] ; then
     cp "$BUILD_DIR/features.json" "$BUILD_DIR/config/wv.json/_features.json"
@@ -106,9 +107,15 @@ fi
 
 # Run processCollections.py if ICD appendices are present
 if [ -e "$BUILD_DIR/icdappendices" ] ; then
-    mkdir -p "$BUILD_DIR"/config/wv.json/collections
     "$PYTHON_SCRIPTS_DIR/processCollections.py" "$BUILD_DIR/icdappendices" \
-        "$BUILD_DIR/config/wv.json/collections/collectionsMap.json"
+        "$BUILD_DIR/icdappendices/conceptIds.json"
+fi
+
+#
+if [ -e "$BUILD_DIR/icdappendices/conceptIds.json" ] ; then
+    mkdir -p "$BUILD_DIR"/config/wv.json/collections
+    "$PYTHON_SCRIPTS_DIR/getCollectionData.py" "$BUILD_DIR/icdappendices/conceptIds.json" \
+        "$BUILD_DIR/config/wv.json/collections.json"
 fi
 
 # Run processColormap.py and move colormaps where we want them
