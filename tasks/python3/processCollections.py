@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-from concurrent.futures import wait, ProcessPoolExecutor
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from optparse import OptionParser
 from openpyxl import load_workbook
 from pprint import pprint as pp
@@ -54,7 +54,6 @@ def get_values_from_sheets(prod_id_sheet, prod_metadata_sheet):
 def process_sheet(filePath):
   filename = os.path.basename(filePath)
   try:
-    print("%s: parsing: %s" % (prog, filename))
     workbook = load_workbook(filePath)
     prod_id_sheet = workbook['Product Identification']
     prod_metadata_sheet = workbook['Product Metadata']
@@ -65,14 +64,12 @@ def process_sheet(filePath):
     # sys.exit(1)
 
 #MAIN
-futures = []
-executor = ProcessPoolExecutor()
+with ThreadPoolExecutor() as executor:
+  for root, dirs, files in os.walk(input_dir):
+    for file in files:
+      fp = os.path.join(input_dir, file)
+      executor.submit(process_sheet, fp)
 
-for root, dirs, files in os.walk(input_dir):
-  for file in files:
-    fp = os.path.join(input_dir, file)
-    futures.append(executor.submit(process_sheet, fp))
-wait(futures)
 with open(output_file, "w") as ofp:
   json.dump(wv_product_dict, ofp)
 

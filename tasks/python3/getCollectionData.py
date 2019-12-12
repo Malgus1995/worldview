@@ -1,22 +1,25 @@
 #!/usr/bin/env python
 
-from concurrent.futures import as_completed
-from requests_futures.sessions import FuturesSession
+from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
 from optparse import OptionParser
 from pprint import pprint as pp
+from util import dict_merge
 import os
 import json
 import sys
+import urllib3
+import certifi
+http = urllib3.PoolManager(
+    cert_reqs='CERT_REQUIRED',
+    ca_certs=certifi.where()
+  )
 # from datetime import datetime
 # now = datetime.now()
-
 prog = os.path.basename(__file__)
-product_dict = {}
-wv_product_dict = {}
-new_layers = {}
-collection_data = {}
-cmr_collection_url = 'https://cmr.earthdata.nasa.gov/search/collections.json?concept_id='
-cmr_umm_collection_url = 'https://cmr.earthdata.nasa.gov/search/collections.umm_json?concept_id='
+cmr_data = {}
+cmr_umm_data = {}
+cmr_collection_url = 'http://cmr.earthdata.nasa.gov/search/collections.json?concept_id='
+cmr_umm_collection_url = 'http://cmr.earthdata.nasa.gov/search/collections.umm_json?concept_id='
 cmr_keep_keys = [
     'id',
     'version_id',
@@ -63,46 +66,49 @@ def clean_ids(item_tuple):
   else:
     return True
 
-def get_products_collections():
-  total_items = len(wv_product_dict)
-  print('%s: Fetching collection data for %s items...' % (prog, total_items))
-  item_tuples = list(filter(clean_ids, wv_product_dict.items()))
+def get_cmr_data(wv_id, concept_id):
+  response = http.request('GET', cmr_collection_url + concept_id)
+  data = json.loads(response.data.decode('utf-8'))
+  entries = data.get('feed', {}).get('entry')
+  cmr_data[wv_id] = { 'cmr': process_entries(entries, cmr_keep_keys) }
 
-  with FuturesSession(max_workers=100) as fs:
-    cmr_futures = { fs.get(cmr_collection_url + c_id): wv_id for wv_id, c_id in item_tuples }
-    cmr_umm_futures = { fs.get(cmr_umm_collection_url + c_id): wv_id for wv_id, c_id in item_tuples }
-
-    for future in as_completed(cmr_futures):
-      wv_id = cmr_futures[future]
-      data = future.result().json()
-      entries = data.get('feed', {}).get('entry')
-      collection_data[wv_id] = { 'cmr': process_entries(entries, cmr_keep_keys) }
-
-    for future in as_completed(cmr_umm_futures):
-      wv_id = cmr_umm_futures[future]
-      data = future.result().json()
-      for item in data.get('items', []):
-        entries = [item.get('umm')]
-        collection_data[wv_id].update({ 'umm': process_entries(entries, cmr_umm_keep_keys) })
-
-  with open(output_file, "w") as fp:
-    json.dump(collection_data, fp)
-    if len(bad_ids) > 0:
-      print("%s: WARNING: Could not get collection data for %s products:" % (prog, len(bad_ids)))
-      for wv_id, c_id in bad_ids.items():
-        print("%s: Product ID: %s, Concept ID: %s" % (prog, wv_id, c_id))
-    print("%s: Mapped %s collections to products in %s" % (
-      prog,
-      len(item_tuples),
-      os.path.basename(output_file)
-    ))
+def get_cmr_umm_data(wv_id, concept_id):
+  response = http.request('GET', cmr_umm_collection_url + concept_id)
+  data = json.loads(response.data.decode('utf-8'))
+  entries = data.get('feed', {}).get('entry')
+  for item in data.get('items', []):
+    entries = [item.get('umm')]
+    cmr_umm_data[wv_id] = { 'umm': process_entries(entries, cmr_umm_keep_keys) }
 
 #MAIN
 with open(input_file, 'rt') as concept_id_map:
   wv_product_dict = json.load(concept_id_map)
-  get_products_collections()
+  print('%s: Fetching collection data for %s items...' % (prog, len(wv_product_dict)))
+  item_tuples = list(filter(clean_ids, wv_product_dict.items()))
+
+  futures = []
+  with ThreadPoolExecutor() as executor:
+    for wv_id, c_id in item_tuples:
+      futures.append(executor.submit(get_cmr_data, wv_id, c_id))
+      futures.append(executor.submit(get_cmr_umm_data, wv_id, c_id))
+
+  for f in futures:
+    try:
+      f.result()
+    except Exception as e:
+      print(e)
+
 with open(output_file, "w") as fp:
+  collection_data = dict_merge(cmr_data, cmr_umm_data)
   json.dump(collection_data, fp)
+  if len(bad_ids) > 0:
+    print("%s: WARNING: Could not get collection data for %s products:" % (prog, len(bad_ids)))
+    for wv_id, c_id in bad_ids.items():
+      print("%s: Product ID: %s, Concept ID: %s" % (prog, wv_id, c_id))
+  print("%s: Retrieved data for %s collections." % (
+    prog,
+    len(collection_data)
+  ))
   # print(datetime.now()-now)
 
 

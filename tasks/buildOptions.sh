@@ -113,7 +113,6 @@ fi
 
 #
 if [ -e "$BUILD_DIR/icdappendices/conceptIds.json" ] ; then
-    mkdir -p "$BUILD_DIR"/config/wv.json/collections
     "$PYTHON_SCRIPTS_DIR/getCollectionData.py" "$BUILD_DIR/icdappendices/conceptIds.json" \
         "$BUILD_DIR/config/wv.json/collections.json"
 fi
